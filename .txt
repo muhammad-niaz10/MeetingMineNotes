@@ -1,2 +1,0 @@
-- updated_tasks (modified existing tasks)
-   - new_tasks (newly created tasks)
