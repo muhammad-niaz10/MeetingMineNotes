@@ -11,3 +11,5 @@ pandas
 matplotlib
 python-multipart
 google-generativeai
+groq
+
