@@ -29,6 +29,7 @@ def get_meeting_notes(meeting_id: str):
     meeting_notes = list(meeting_notes_collection.find({"meeting": ObjectId(meeting_id)}))
     meeting_details = meeting_details_collection.find_one({"_id": ObjectId(meeting_id)})
 
+
     for note in meeting_notes:
         note["_id"] = str(note["_id"])
         note["user"] = str(note["user"])
@@ -84,10 +85,14 @@ def get_meeting_data(meeting_id: str):
     )
 )
 
+
 # =========================
 # 1. PREVIOUS SUMMARIES
 # =========================
   previous_summaries = []
+
+  for s in summaries:
+    previous_summaries.append(s.get("overall_summary", ""))
 
 # =========================
 # 2. PREVIOUS TASKS (MERGED)
@@ -95,12 +100,6 @@ def get_meeting_data(meeting_id: str):
   task_map = {}
 
   for s in summaries:
-    
-    
-
-    # collect summaries
-    if s.get("overall_summary"):
-        previous_summaries.append(s["overall_summary"])
 
     # collect tasks
     tasks = s.get("key_insights", {}).get("action_items", [])
@@ -414,14 +413,43 @@ RULES:
 4. Do NOT repeat full previous summaries.
 5. Only include key recurring themes or patterns from history.
 
-FINAL OVERALL SUMMARY RULE:
-- Combine:
-   → Current meeting summary (primary)
-   → Historical summary (secondary, brief)
+FINAL SUMMARY RULE:
+
+- Generate:
+   → overall_summary (ONLY current meeting)
+   → overall_all_meeting_summary (current + previous summaries)
 
 Format:
-"overall_summary" = 
-  Current meeting insights + brief historical context (1-2 lines max)
+
+"overall_summary" = Current meeting only
+
+"overall_all_meeting_summary" = 
+Combined summary of:
+- current meeting
+- previous meetings (short, trend-based)
+
+
+========================
+OVERALL SUMMARY STRUCTURE RULE (UPDATED)
+========================
+
+The field "overall_summary" is a structured object:
+
+- current_meeting_summary:
+    Summary ONLY of the current meeting content.
+
+- global_meeting_summary:
+    A unified executive summary combining:
+      - current meeting summary
+      - previous meeting summaries
+
+GLOBAL RULES:
+1. current_meeting_summary = 100% current meeting only
+2. global_meeting_summary = cross-meeting intelligence (history + current)
+3. Do NOT duplicate content between both fields
+4. global_meeting_summary must reflect trends, continuity, and evolution across meetings
+5. Keep both concise and non-redundant
+
 
 ========================
 OUTPUT JSON SCHEMA (STRICT)
@@ -431,6 +459,7 @@ Return exactly this structure:
 {{
   "agenda": "string",
   "overall_summary": "string",
+"overall_all_meeting_summary": "string",
   "meeting_overview": {{
     "total_topics": number,
     "total_participants": number
@@ -531,6 +560,8 @@ PREVIOUS SUMMARIES
     "topic_wise_discussion": result["topic_wise_discussion"],
     "key_insights": result["key_insights"],
     "individual_speaker_summaries": result["individual_speaker_summaries"],
+    "previous_tasks": result.get("task_state", {}).get("previous_tasks", []),
+    "overall_all_meeting_summary": result.get("overall_all_meeting_summary", ""),
     "created_at": datetime.utcnow()
 })
         return result
@@ -564,3 +595,12 @@ def get_meeting_summary():
         })
       
     return  previous_task
+
+
+@app.get("/overal_summaries")
+def get_overall_summaries():
+    summary = list(niaz_meeting_summaries.find())
+    previous_summaries=  []
+    for s in summary:
+      previous_summaries.append(s.get("overall_summary", ""))
+    return previous_summaries
