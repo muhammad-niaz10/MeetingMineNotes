@@ -4,7 +4,8 @@ from fastapi import FastAPI
 import json
 from datetime import datetime
 import uuid
-
+from groq import Groq
+from config import GROQ_API_KEY
 
 app = FastAPI()
 
@@ -58,100 +59,169 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 #model = genai.GenerativeModel("gemini-2.5-flash")
 
-model = genai.GenerativeModel(
-    "gemini-2.5-flash",
-    generation_config={
-        "temperature": 0.2,
-        "response_mime_type": "application/json"
-    }
-)
+#model = genai.GenerativeModel(
+ #    model_name="gemini-2.0-flash",
+  #  generation_config={
+   #     "temperature": 0.2,
+    #    "response_mime_type": "application/json"
+   # }
+#)
 
+
+client = Groq(
+    api_key=GROQ_API_KEY
+)
 
 
 @app.get("/meeting/{meeting_id}")
 def get_meeting_data(meeting_id: str):
 
-    summaries = list(niaz_meeting_summaries.find({"meeting_id": {"$ne": ObjectId(meeting_id)}}))
 
-    previous_task=  []
-    if summaries:
-      for s in summaries:
+  
+  summaries = list(
+    niaz_meeting_summaries.find(
+        {"meeting_id": {"$ne": ObjectId(meeting_id)}}
+    )
+)
 
-        task = s.get("key_insights", {}).get("action_items", [])
-        for t in task:
-          previous_task.append({
-            "meeting_id": str(s.get("meeting_id")),
-            "agenda": s.get("agenda", "Unknown"),
-            "owner": t.get("owner", "Unknown"),
-            "task": t.get("task", ""),
-            "status": t.get("status", "Pending"),
-            "priority": t.get("priority", "High"),
-            "task_id": t.get("task_id", "")
-        })
+# =========================
+# 1. PREVIOUS SUMMARIES
+# =========================
+  previous_summaries = []
 
-    else:
-      previous_task = []
+# =========================
+# 2. PREVIOUS TASKS (MERGED)
+# =========================
+  task_map = {}
 
-    data = list(meeting_notes_collection.find({
-        "meeting": ObjectId(meeting_id)
-    }))
+  for s in summaries:
+    
+    
 
-    meeting_details = meeting_details_collection.find_one({"_id": ObjectId(meeting_id)})
+    # collect summaries
+    if s.get("overall_summary"):
+        previous_summaries.append(s["overall_summary"])
 
-    grouped = {}
+    # collect tasks
+    tasks = s.get("key_insights", {}).get("action_items", [])
 
-    for item in data:
-        item = serialize(item)
+    for t in tasks:
 
-        topic = item["topic"]
+        task_name = t.get("task", "").strip().lower()
+
+        # if task already exists → merge
+        if task_name in task_map:
+
+            existing = task_map[task_name]
+
+            # keep worst-case status priority (simple logic)
+            if t.get("status") == "Completed":
+                existing["status"] = "Completed"
+            elif t.get("status") == "In Progress" and existing["status"] != "Completed":
+                existing["status"] = "In Progress"
+
+        else:
+            task_map[task_name] = {
+                "meeting_id": str(s.get("meeting_id")),
+                "agenda": s.get("agenda", "Unknown"),
+                "owner": t.get("owner", "Unknown"),
+                "task": t.get("task", ""),
+                "status": t.get("status", "Pending"),
+                "priority": t.get("priority", "High"),
+                "task_id": t.get("task_id", "")
+            }
+
+# FINAL CLEAN OUTPUT
+  previous_task = list(task_map.values())
+
+  meeting_details = meeting_details_collection.find_one({"_id": ObjectId(meeting_id)})
+
+  #grouped = {}
+  #data = list(meeting_notes_collection.find({"meeting": ObjectId(meeting_id)}))
+
+  #for item in data:
+   #   item = serialize(item)
+
+    #  topic = item["topic"]
 
     # Step 1: Topic create karo agar exist nahi karta
-        if topic not in grouped:
-            grouped[topic] = {
+     # if topic not in grouped:
+      #    grouped[topic] = {
+       #     "topic": topic,
+        #    "statements": []
+        #}
+
+    # Step 2: User name fetch karo
+      #user_data = name.find_one({"_id": ObjectId(item["user"])})
+      #user_name = user_data["name"] if user_data else "Unknown"
+
+    # Step 3: Statement add karo
+      #grouped[topic]["statements"].append({
+      #  "statement": item["statement"],
+      #  "user": user_name
+    #})
+
+     # meeting = {
+      #  "details": meeting_details["agenda"] if meeting_details else "No details found",
+       # "topics": list(grouped.values())
+   # }
+
+
+    #  clean_meeting = {
+    #"details": meeting["details"],
+    #"topics": [
+     #   {
+      #      "topic": t["topic"],
+       #     "statements": [
+        #        {
+         #           "text": s["statement"],
+          #          "speaker": s["user"]
+           #     }
+            #    for s in t["statements"]
+            #]
+       # }
+       # for t in meeting["topics"]
+   # ]
+#}
+
+    
+
+ #     clean_meeting_json = json.dumps(clean_meeting, indent=2)
+
+
+  data = list(meeting_notes_collection.find({"meeting": ObjectId(meeting_id)}))
+
+  grouped = {}
+
+  for item in data:
+    item = serialize(item)
+
+    user_data = name.find_one({"_id": ObjectId(item["user"])})
+    user_name = user_data["name"] if user_data else "Unknown"
+
+    topic = item.get("topic", "Unknown").strip()
+
+    if topic not in grouped:
+        grouped[topic] = {
             "topic": topic,
             "statements": []
         }
 
-    # Step 2: User name fetch karo
-        user_data = name.find_one({"_id": ObjectId(item["user"])})
-        user_name = user_data["name"] if user_data else "Unknown"
-
-    # Step 3: Statement add karo
-        grouped[topic]["statements"].append({
-        "statement": item["statement"],
-        "user": user_name
+    grouped[topic]["statements"].append({
+        "speaker": user_name,
+        "statement": item.get("statement", "")
     })
 
-    meeting = {
-        "details": meeting_details["agenda"] if meeting_details else "No details found",
-        "topics": list(grouped.values())
-    }
-
-
-    clean_meeting = {
-    "details": meeting["details"],
-    "topics": [
-        {
-            "topic": t["topic"],
-            "statements": [
-                {
-                    "text": s["statement"],
-                    "speaker": s["user"]
-                }
-                for s in t["statements"]
-            ]
-        }
-        for t in meeting["topics"]
-    ]
+  clean_meeting = {
+    "details": meeting_details["agenda"] if meeting_details else "No details found",
+    "topics": list(grouped.values())
 }
 
+  clean_meeting_json = json.dumps(clean_meeting, indent=2)
+  previous_tasks_json = previous_task
     
 
-    clean_meeting_json = json.dumps(clean_meeting, indent=2)
-    previous_tasks_json = previous_task
-    
-
-    if not previous_task:
+  if not previous_task:
         prompt = f"""
 You are a production-grade Meeting Intelligence System designed for enterprise-level meeting analysis, summarization, and action tracking.
 
@@ -243,8 +313,8 @@ INPUT DATA
 {clean_meeting_json}
 """
 
-    else:
-        prompt = f"""
+  else:
+      prompt = f"""
 You are a production-grade Meeting Intelligence System designed for enterprise-level meeting analysis, summarization, and action tracking.
 
 ========================
@@ -328,6 +398,31 @@ G) OUTPUT MUST SEPARATE TASKS INTO :
 H) IMPORTANT:
    - DO NOT include previous_tasks inside action_items
 
+
+========================
+HISTORICAL CONTEXT LAYER (IMPORTANT)
+========================
+You will also receive previous meeting summaries.
+
+GOAL:
+- Provide continuity across meetings without overpowering current meeting insights.
+
+RULES:
+1. Extract a VERY SHORT combined summary of previous meetings.
+2. Previous summaries must have LOW influence (max 20% weight).
+3. Current meeting MUST dominate final overall_summary (80% focus).
+4. Do NOT repeat full previous summaries.
+5. Only include key recurring themes or patterns from history.
+
+FINAL OVERALL SUMMARY RULE:
+- Combine:
+   → Current meeting summary (primary)
+   → Historical summary (secondary, brief)
+
+Format:
+"overall_summary" = 
+  Current meeting insights + brief historical context (1-2 lines max)
+
 ========================
 OUTPUT JSON SCHEMA (STRICT)
 ========================
@@ -364,9 +459,8 @@ Return exactly this structure:
     ]
   }},
   "task_state": {{
-    "previous_tasks": [],
-    "updated_tasks": [],
-    "new_tasks": []
+    "previous_tasks": []
+    
   }},
   "individual_speaker_summaries": [
     {{
@@ -394,6 +488,11 @@ INPUT DATA
 PREVIOUS TASKS DATA
 ========================
 {previous_task}
+
+========================
+PREVIOUS SUMMARIES
+========================
+{previous_summaries}
 """
            
     #response = model.generate_content(prompt)
@@ -402,15 +501,27 @@ PREVIOUS TASKS DATA
 
 
 
-    response = model.generate_content(prompt) 
+    
+  try:
 
-    try:
-        result = json.loads(response.text)
-        result["meeting_id"] = str(ObjectId(meeting_id))
-        result["created_at"] = datetime.utcnow()
+      response = client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    messages=[
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ],
+    temperature=0.2
+)
 
-        for task in result["key_insights"]["action_items"]:
-            task["task_id"] = str(uuid.uuid4())
+      result = json.loads(response.choices[0].message.content)
+      result["meeting_id"] = str(ObjectId(meeting_id))
+      result["created_at"] = datetime.utcnow()
+
+      for task in result["key_insights"]["action_items"]:
+
+        task["task_id"] = str(uuid.uuid4())
 
         niaz_meeting_summaries.insert_one({
     "meeting_id": ObjectId(meeting_id),
@@ -422,13 +533,13 @@ PREVIOUS TASKS DATA
     "individual_speaker_summaries": result["individual_speaker_summaries"],
     "created_at": datetime.utcnow()
 })
-
         return result
-    except Exception as e:
+  except Exception as e:
+
         return {
-        "error": "Invalid JSON from Gemini",
-        "raw_output": response.text
+        "error": str(e)
     }
+
 
     
 
