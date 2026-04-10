@@ -544,7 +544,19 @@ PREVIOUS SUMMARIES
     temperature=0.2
 )
 
-      result = json.loads(response.choices[0].message.content)
+
+      raw = response.choices[0].message.content.strip()
+
+      if "```" in raw:
+        raw = raw.split("```")[1]
+        raw = raw.replace("json", "").strip()
+
+      print(raw)  # optional debug
+
+      result = json.loads(raw)
+
+
+
       result["meeting_id"] = str(ObjectId(meeting_id))
       result["created_at"] = datetime.utcnow()
 
