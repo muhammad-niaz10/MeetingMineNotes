@@ -76,6 +76,9 @@ client = Groq(
 
 @app.get("/meeting/{meeting_id}")
 def get_meeting_data(meeting_id: str):
+  
+
+  
 
 
   
@@ -208,6 +211,7 @@ def get_meeting_data(meeting_id: str):
 
     grouped[topic]["statements"].append({
         "speaker": user_name,
+        "speaker_id": str(item["user"]),
         "statement": item.get("statement", "")
     })
 
@@ -283,6 +287,7 @@ Return exactly this structure:
     "action_items": [
       {{
         "owner": "string",
+        "owner_id": "string",
         "task": "string",
         "status": "Pending",
         "priority": "High"
@@ -481,6 +486,7 @@ Return exactly this structure:
     "action_items": [
       {{
         "owner": "string",
+        "owner_id": "string",
         "task": "string",
         "status": "Pending",
         "priority": "High"
@@ -498,6 +504,58 @@ Return exactly this structure:
     }}
   ]
 }}
+
+
+========================
+ACTION ITEM OWNERSHIP RULES (STRICT - NON NEGOTIABLE)
+========================
+
+1. Every action item MUST be assigned to a REAL speaker from the input data.
+
+2. Owner MUST be selected ONLY from:
+   → "speaker" field inside topic_wise_discussion
+
+3. DO NOT use generic roles such as:
+   - "Team"
+   - "Marketing Team"
+   - "Product Team"
+   - "HR Team"
+   - "All Employees"
+   - "Company"
+   - "Management"
+
+4. If a task is discussed by a speaker:
+   → assign that exact speaker as owner
+
+5. If multiple speakers are involved:
+   → assign the speaker who INITIATED or COMMITTED to the task
+
+6. If NO clear owner exists:
+   → set:
+      "owner": "Unknown"
+      "owner_id": "Unknown"
+
+7. Owner name MUST EXACTLY MATCH speaker name from input
+   (case-sensitive, no modification)
+
+8. DO NOT infer or invent new names
+
+9. DO NOT summarize owner (no roles, no departments)
+
+10. If owner is not a valid speaker → REJECT that assignment
+
+========================
+VALIDATION RULE (CRITICAL)
+========================
+
+Before returning output:
+- Cross-check every action_item.owner exists in:
+  topic_wise_discussion[].discussion[].speaker
+
+- If not found → replace with "Unknown"
+
+
+
 
 ========================
 DATA ACCURACY RULES
@@ -563,8 +621,11 @@ PREVIOUS SUMMARIES
       for task in result["key_insights"]["action_items"]:
 
         task["task_id"] = str(uuid.uuid4())
+        
+        user_data = name.find_one({"name": task["owner"]})
+        task["owner_id"] = str(user_data["_id"]) if user_data else "Unknown"
 
-        niaz_meeting_summaries.insert_one({
+      niaz_meeting_summaries.insert_one({
     "meeting_id": ObjectId(meeting_id),
     "agenda": result["agenda"],
     "overall_summary": result["overall_summary"],
@@ -576,7 +637,7 @@ PREVIOUS SUMMARIES
     "overall_all_meeting_summary": result.get("overall_all_meeting_summary", ""),
     "created_at": datetime.utcnow()
 })
-        return result
+      return result
   except Exception as e:
 
         return {
